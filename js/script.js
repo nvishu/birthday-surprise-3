@@ -10,11 +10,14 @@ const CONFIG = {
   turningAge: 31,
   metDate: "2026-01-01T00:00:00",      // CHANGE to the exact day she joined your project
 
-    photoCount: 50,                      // gallery checks pic1..pic42; missing ones are skipped
+  /* PHOTOS: write them as numbers (41), "41" or "pic41" - all three work. Files live in the pictures folder.
+     Open index.html?debug to see which file each photo below was matched to (or MISSING). */
+  photoVersion: "1",                   // change to "2", "3"... after you REPLACE picture files, so phones reload them
+  photoCount: 50,                      // gallery shows pic1..pic50 in number order; missing numbers are skipped
   heroPhoto: "pic1",
   letterPhoto: "pic2",
   puzzlePhoto: "pic33",
-  memoryPhotos: ["pic1", "pic2", "pic3", "pic4", "pic5", "pic6","pic41","pic8","pic9","pic33","pic12"],
+  memoryPhotos: ["pic1", "pic2", "pic3", "pic4", "pic5", "pic6", "pic41", "pic8", "pic9", "pic33", "pic12"],   // every photo listed here becomes a pair of cards
   captions: [],                        // optional: ["caption for pic1", "caption for pic2", ...]
 
   timeline: [
@@ -97,36 +100,103 @@ Never forget how loved you are.`
    ========================================================= */
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
+const make = (tag, cls, html) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html != null) e.innerHTML = html;
+  return e;
+};
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const ordinal = n => { const s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+const setText = (el, v) => { v = String(v); if (el.textContent !== v) el.textContent = v; };   // skips needless DOM writes
 const IS_MOBILE = matchMedia("(max-width: 700px)").matches;
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const LOW_END = !!((navigator.deviceMemory && navigator.deviceMemory <= 2) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4));
+const FX = REDUCED ? 0 : LOW_END ? 0.6 : 1;                       // scales decorative particle counts
+const DEBUG = /[?&]debug\b/.test(location.search);                // open index.html?debug to see which photos were found
 
-/* Images: supports jpg, png, jpeg (any case) */
-const EXTENSIONS = ["jpg", "png", "jpeg", "JPG", "PNG", "JPEG"];
-const imgCache = {};
-function resolveImage(name) {
-  if (imgCache[name]) return imgCache[name];
-  imgCache[name] = new Promise(resolve => {
-    let i = 0;
-    const tryNext = () => {
-      if (i >= EXTENSIONS.length) return resolve(null);
-      const src = `pictures/${name}.${EXTENSIONS[i++]}`;
-      const img = new Image();
-      img.onload = () => resolve(src);
-      img.onerror = tryNext;
-      img.src = src;
-    };
-    tryNext();
-  });
-  return imgCache[name];
+/* Pause every CSS animation while the tab is hidden (saves battery) */
+document.head.append(make("style", "", "html.tab-hidden *{animation-play-state:paused!important}"));
+document.addEventListener("visibilitychange", () => document.documentElement.classList.toggle("tab-hidden", document.hidden));
+
+/* =========================================================
+   PHOTOS
+   Write a photo as a number (41), "41" or "pic41". A full file name such as "beach.webp" also works.
+   Files are looked up in /pictures. Supported: jpg, jpeg, png, webp, gif, avif, jfif (any case).
+   Lookups use cheap HEAD requests, so no photo is downloaded until it is actually shown.
+   ========================================================= */
+const PHOTO_DIR = "pictures/";
+const PHOTO_EXTS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP", "jfif", "gif", "avif"];
+const VERSION_QS = CONFIG.photoVersion ? "?v=" + encodeURIComponent(CONFIG.photoVersion) : "";
+const photoName = id => { const s = String(id).trim(); return /^\d+$/.test(s) ? "pic" + s : s; };
+const hasExt = n => /\.[a-z0-9]{2,5}$/i.test(n);
+const photoCache = new Map(), extScore = {};
+let headSupported = location.protocol !== "file:" && typeof fetch === "function";
+
+const limit = (() => {                                            // max 6 lookups at the same time
+  let active = 0; const queue = [];
+  const next = () => {
+    if (active >= 6 || !queue.length) return;
+    active++;
+    const { fn, res, rej } = queue.shift();
+    fn().then(res, rej).finally(() => { active--; next(); });
+  };
+  return fn => new Promise((res, rej) => { queue.push({ fn, res, rej }); next(); });
+})();
+
+const probeImage = url => new Promise(ok => {                     // fallback when HEAD is not possible (file://)
+  const im = new Image();
+  im.onload = () => ok(true);
+  im.onerror = () => ok(false);
+  im.src = url;
+});
+async function exists(url) {
+  if (headSupported) {
+    try {
+      const r = await fetch(url, { method: "HEAD" });
+      if (r.status === 405 || r.status === 501) headSupported = false;
+      else return r.ok && !(r.headers.get("content-type") || "").startsWith("text/html");
+    } catch (e) { headSupported = false; }
+  }
+  return probeImage(url);
 }
+async function findPhoto(name) {
+  const exts = hasExt(name) ? [""] : PHOTO_EXTS.slice().sort((a, b) => (extScore[b] || 0) - (extScore[a] || 0));
+  for (const ext of exts) {
+    const url = PHOTO_DIR + name + (ext ? "." + ext : "") + VERSION_QS;
+    if (await exists(url)) { if (ext) extScore[ext] = (extScore[ext] || 0) + 1; return url; }
+  }
+  console.warn(`[photos] ${PHOTO_DIR}${name} not found`);
+  return null;
+}
+const resolvePhoto = id => {
+  if (id == null || id === "") return Promise.resolve(null);
+  const name = photoName(id);
+  if (!photoCache.has(name)) photoCache.set(name, limit(() => findPhoto(name)));
+  return photoCache.get(name);
+};
 function placeholderSrc(name) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#ffd6e3"/><text x="50%" y="47%" font-family="Arial" font-size="40" fill="#e8467c" text-anchor="middle">&#10084;</text><text x="50%" y="60%" font-family="Arial" font-size="18" fill="#a8285a" text-anchor="middle">pictures/${name}</text></svg>`;
   return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
-async function setImage(el, name) {
-  el.src = (await resolveImage(name)) || placeholderSrc(name);
+async function setImage(el, id, lazy) {
+  el.decoding = "async";
+  el.loading = lazy ? "lazy" : "eager";
+  const name = photoName(id);
+  el.onerror = () => { el.onerror = null; el.src = placeholderSrc(name); };
+  el.src = (await resolvePhoto(id)) || placeholderSrc(name);
+}
+
+/* Run fn when a section is about to scroll into view (or a few seconds after unlocking, whichever is first) */
+const lazyStarters = [];
+function whenNear(target, fn, margin = "800px") {
+  let done = false;
+  const run = () => { if (!done) { done = true; fn(); } };
+  lazyStarters.push(run);
+  const el = typeof target === "string" ? $(target) : target;
+  if (!el || !("IntersectionObserver" in window)) { run(); return; }
+  const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); run(); } }, { rootMargin: margin });
+  io.observe(el);
 }
 
 /* =========================================================
@@ -187,18 +257,18 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden" && played && !finalSent) sendResults(false);
 });
 
-
 /* Small win sound (no file needed) */
 let actx;
 function ding(freq = 880) {
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const o = actx.createOscillator(), g = actx.createGain();
+    if (actx.state === "suspended") actx.resume();
+    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
     o.type = "sine"; o.frequency.value = freq;
-    g.gain.setValueAtTime(0.15, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.4);
+    g.gain.setValueAtTime(0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
     o.connect(g).connect(actx.destination);
-    o.start(); o.stop(actx.currentTime + 0.4);
+    o.start(t); o.stop(t + 0.4);
   } catch (e) {}
 }
 
@@ -246,45 +316,72 @@ const musicObserver = new IntersectionObserver(entries => {
 $$("section[data-song]").forEach(s => musicObserver.observe(s));
 
 /* =========================================================
-   CONFETTI
+   CONFETTI (glyphs are drawn once into small sprites, then reused)
    ========================================================= */
 const cCanvas = $("#confetti"), cctx = cCanvas.getContext("2d");
-let particles = [], confettiRunning = false;
-function resizeConfetti() { cCanvas.width = innerWidth; cCanvas.height = innerHeight; }
-resizeConfetti(); addEventListener("resize", resizeConfetti);
+let particles = [], confettiRunning = false, resizeRaf = 0;
+const MAX_PARTICLES = IS_MOBILE ? 350 : 600;
 const GLYPHS = { heart: "\u2764", flower: "\u273F", star: "\u2726" };
+const CONFETTI_COLORS = ["#e8467c", "#ffd6e3", "#d9a441", "#a8285a", "#ffffff", "#f9a8c2"];
+const CONFETTI_SHAPES = ["rect", "rect", "circle", "heart", "flower", "star"];
+const SPRITE_SIZES = [14, 18, 22, 26];
+const sprites = new Map();
+function glyphSprite(shape, color, size) {
+  const key = shape + color + size;
+  let c = sprites.get(key);
+  if (!c) {
+    c = document.createElement("canvas"); c.width = c.height = size * 2;
+    const g = c.getContext("2d");
+    g.fillStyle = color; g.font = `${size}px Arial`; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(GLYPHS[shape], size, size);
+    sprites.set(key, c);
+  }
+  return c;
+}
+function resizeConfetti() { cCanvas.width = innerWidth; cCanvas.height = innerHeight; }
+resizeConfetti();
+addEventListener("resize", () => { cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(resizeConfetti); }, { passive: true });
+
 function burstConfetti(count = 150) {
   if (IS_MOBILE) count = Math.round(count * 0.6);
-  const colors = ["#e8467c", "#ffd6e3", "#d9a441", "#a8285a", "#ffffff", "#f9a8c2"];
-  const shapes = ["rect", "rect", "circle", "heart", "flower", "star"];
+  if (LOW_END) count = Math.round(count * 0.7);
   for (let i = 0; i < count; i++) {
+    const shape = CONFETTI_SHAPES[Math.floor(Math.random() * CONFETTI_SHAPES.length)];
+    const color = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+    const size = SPRITE_SIZES[Math.floor(Math.random() * SPRITE_SIZES.length)];
     particles.push({
       x: Math.random() * cCanvas.width, y: -20 - Math.random() * cCanvas.height * 0.5,
-      w: 6 + Math.random() * 6, h: 8 + Math.random() * 8, size: 14 + Math.random() * 12,
+      w: 6 + Math.random() * 6, h: 8 + Math.random() * 8, size,
       vx: Math.random() * 2 - 1, vy: 2 + Math.random() * 3,
       rot: Math.random() * 6, vr: Math.random() * 0.2 - 0.1,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      shape: shapes[Math.floor(Math.random() * shapes.length)]
+      color, shape, sprite: GLYPHS[shape] ? glyphSprite(shape, color, size) : null
     });
   }
+  if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
   if (!confettiRunning) { confettiRunning = true; requestAnimationFrame(drawConfetti); }
 }
 function drawConfetti() {
+  cctx.setTransform(1, 0, 0, 1, 0, 0);
   cctx.clearRect(0, 0, cCanvas.width, cCanvas.height);
-  particles.forEach(p => {
+  const limitY = cCanvas.height + 20;
+  let n = 0;
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
     p.x += p.vx; p.y += p.vy; p.rot += p.vr;
-    cctx.save(); cctx.translate(p.x, p.y); cctx.rotate(p.rot);
-    cctx.fillStyle = p.color;
-    if (p.shape === "rect") cctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
-    else if (p.shape === "circle") { cctx.beginPath(); cctx.arc(0, 0, p.w / 2, 0, Math.PI * 2); cctx.fill(); }
+    if (p.y >= limitY) continue;
+    particles[n++] = p;
+    const c = Math.cos(p.rot), s = Math.sin(p.rot);
+    cctx.setTransform(c, s, -s, c, p.x, p.y);
+    if (p.sprite) cctx.drawImage(p.sprite, -p.size, -p.size);
     else {
-      cctx.font = `${p.size}px Arial`; cctx.textAlign = "center"; cctx.textBaseline = "middle";
-      cctx.fillText(GLYPHS[p.shape], 0, 0);
+      cctx.fillStyle = p.color;
+      if (p.shape === "rect") cctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      else { cctx.beginPath(); cctx.arc(0, 0, p.w / 2, 0, Math.PI * 2); cctx.fill(); }
     }
-    cctx.restore();
-  });
-  particles = particles.filter(p => p.y < cCanvas.height + 20);
-  if (particles.length) requestAnimationFrame(drawConfetti);
+  }
+  particles.length = n;
+  cctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (n) requestAnimationFrame(drawConfetti);
   else { confettiRunning = false; cctx.clearRect(0, 0, cCanvas.width, cCanvas.height); }
 }
 
@@ -293,52 +390,52 @@ function drawConfetti() {
    ========================================================= */
 const bgLayer = $("#hearts-bg");
 const DECOR = ["&#10084;", "&#10084;", "&#128150;", "&#127800;", "&#127799;", "&#127801;", "&#10047;", "&#10048;"];
-const floatCount = REDUCED ? 0 : IS_MOBILE ? 16 : 30;
-for (let i = 0; i < floatCount; i++) {
-  const h = document.createElement("span");
-  h.className = "bg-float";
-  h.innerHTML = DECOR[Math.floor(Math.random() * DECOR.length)];
-  h.style.left = Math.random() * 100 + "%";
-  h.style.fontSize = (IS_MOBILE ? 12 : 14) + Math.random() * (IS_MOBILE ? 18 : 26) + "px";
-  h.style.animationDuration = 10 + Math.random() * 14 + "s";
-  h.style.animationDelay = -Math.random() * 20 + "s";
-  h.style.setProperty("--sway", (Math.random() * 80 - 40).toFixed(0) + "px");
-  bgLayer.appendChild(h);
-}
-const sparkCount = REDUCED ? 0 : IS_MOBILE ? 18 : 35;
-for (let i = 0; i < sparkCount; i++) {
-  const s = document.createElement("span");
-  s.className = "sparkle"; s.innerHTML = "&#10022;";
-  s.style.left = Math.random() * 100 + "%";
-  s.style.top = Math.random() * 100 + "%";
-  s.style.fontSize = 8 + Math.random() * 12 + "px";
-  s.style.animationDelay = -Math.random() * 3 + "s";
-  s.style.animationDuration = 2 + Math.random() * 2 + "s";
-  bgLayer.appendChild(s);
-}
+(() => {
+  const frag = document.createDocumentFragment();
+  const floatCount = Math.round((IS_MOBILE ? 16 : 30) * FX);
+  for (let i = 0; i < floatCount; i++) {
+    const h = make("span", "bg-float", DECOR[Math.floor(Math.random() * DECOR.length)]);
+    h.style.left = Math.random() * 100 + "%";
+    h.style.fontSize = (IS_MOBILE ? 12 : 14) + Math.random() * (IS_MOBILE ? 18 : 26) + "px";
+    h.style.animationDuration = 10 + Math.random() * 14 + "s";
+    h.style.animationDelay = -Math.random() * 20 + "s";
+    h.style.setProperty("--sway", (Math.random() * 80 - 40).toFixed(0) + "px");
+    frag.append(h);
+  }
+  const sparkCount = Math.round((IS_MOBILE ? 18 : 35) * FX);
+  for (let i = 0; i < sparkCount; i++) {
+    const s = make("span", "sparkle", "&#10022;");
+    s.style.left = Math.random() * 100 + "%";
+    s.style.top = Math.random() * 100 + "%";
+    s.style.fontSize = 8 + Math.random() * 12 + "px";
+    s.style.animationDelay = -Math.random() * 3 + "s";
+    s.style.animationDuration = 2 + Math.random() * 2 + "s";
+    frag.append(s);
+  }
+  bgLayer.append(frag);
+})();
 
 /* Tap anywhere: small burst of hearts and flowers */
 const TAP_GLYPHS = ["&#10084;", "&#127800;", "&#10022;", "&#127799;", "&#10047;"];
+let liveSprinkles = 0;
 document.addEventListener("pointerdown", e => {
-  if (REDUCED || document.body.classList.contains("locked")) return;
-  if (e.target.closest("#scratch, #hearts-area")) return;   // don't disturb the games
+  if (REDUCED || liveSprinkles > 36 || document.body.classList.contains("locked")) return;
+  if (e.target.closest("#scratch, #hearts-area")) return;          // don't disturb the games
   for (let i = 0; i < 6; i++) {
-    const s = document.createElement("span");
-    s.className = "tap-sprinkle";
-    s.innerHTML = TAP_GLYPHS[Math.floor(Math.random() * TAP_GLYPHS.length)];
+    const s = make("span", "tap-sprinkle", TAP_GLYPHS[Math.floor(Math.random() * TAP_GLYPHS.length)]);
     s.style.left = e.clientX + "px"; s.style.top = e.clientY + "px";
     const ang = Math.random() * Math.PI * 2, dist = 30 + Math.random() * 50;
     s.style.setProperty("--dx", Math.cos(ang) * dist + "px");
     s.style.setProperty("--dy", Math.sin(ang) * dist + "px");
-    document.body.appendChild(s);
-    s.addEventListener("animationend", () => s.remove());
+    document.body.append(s);
+    liveSprinkles++;
+    s.addEventListener("animationend", () => { s.remove(); liveSprinkles--; }, { once: true });
   }
 }, { passive: true });
 
 const revealObserver = new IntersectionObserver(entries => {
   entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add("visible"); revealObserver.unobserve(e.target); } });
 }, { threshold: 0.15 });
-
 
 /* =========================================================
    LOCK SCREEN
@@ -349,6 +446,7 @@ $("#lock-form").onsubmit = e => {
   const val = $("#lock-input").value.trim().toLowerCase();
   if (val === CONFIG.password.toLowerCase()) unlock();
   else {
+    RESULTS.passwordAttempts++;
     $("#lock-error").textContent = "Not quite... think about what I call you.";
     const card = $(".lock-card");
     card.classList.remove("shake"); void card.offsetWidth; card.classList.add("shake");
@@ -356,6 +454,7 @@ $("#lock-form").onsubmit = e => {
 };
 function unlock() {
   unlocked = true;
+  RESULTS.openedAt = new Date();
   currentSong = 1;
   player.src = "audio/song1.mp3";
   try { player.volume = 0; } catch (e) {}
@@ -364,6 +463,7 @@ function unlock() {
   $("#lock").classList.add("hide");
   document.body.classList.remove("locked");
   burstConfetti(220);
+  setTimeout(() => lazyStarters.forEach(run => run()), 6000);      // safety net for the lazy sections
 }
 
 /* =========================================================
@@ -372,28 +472,31 @@ function unlock() {
 setImage($("#hero-img"), CONFIG.heroPhoto);
 $("#footer-name").textContent = CONFIG.signOff;
 
+const birthdayAt = new Date(CONFIG.birthday), metAt = new Date(CONFIG.metDate);
+const heroSub = $("#hero-sub"), cdDays = $("#cd-days"), cdHours = $("#cd-hours"), cdMins = $("#cd-mins"), cdSecs = $("#cd-secs");
+const daysTogether = $("#days-together"), countdownBox = $("#countdown");
 function updateTimers() {
-  const now = new Date();
-  const diff = new Date(CONFIG.birthday) - now;
+  const now = new Date(), diff = birthdayAt - now;
   if (diff > 0) {
-    $("#hero-sub").textContent = "Counting down every second to your special day";
-    $("#cd-days").textContent = Math.floor(diff / 86400000);
-    $("#cd-hours").textContent = Math.floor(diff / 3600000) % 24;
-    $("#cd-mins").textContent = Math.floor(diff / 60000) % 60;
-    $("#cd-secs").textContent = Math.floor(diff / 1000) % 60;
+    setText(heroSub, "Counting down every second to your special day");
+    setText(cdDays, Math.floor(diff / 86400000));
+    setText(cdHours, Math.floor(diff / 3600000) % 24);
+    setText(cdMins, Math.floor(diff / 60000) % 60);
+    setText(cdSecs, Math.floor(diff / 1000) % 60);
   } else {
-    $("#countdown").style.display = "none";
-    $("#hero-sub").textContent = `It's finally here. Happy ${ordinal(CONFIG.turningAge)} birthday, my love. Today is all about you.`;
+    countdownBox.style.display = "none";
+    setText(heroSub, `It's finally here. Happy ${ordinal(CONFIG.turningAge)} birthday, my love. Today is all about you.`);
   }
-  const days = Math.max(0, Math.floor((now - new Date(CONFIG.metDate)) / 86400000));
-  $("#days-together").textContent = days;
+  setText(daysTogether, Math.max(0, Math.floor((now - metAt) / 86400000)));
+  setTimeout(updateTimers, diff > 0 ? 1000 - (Date.now() % 1000) : 60000);   // stays on the second, then relaxes after the birthday
 }
-updateTimers(); setInterval(updateTimers, 1000);
+updateTimers();
 
 $$(".candle").forEach(c => c.onclick = () => {
   if (c.classList.contains("out")) return;
   c.classList.add("out"); ding(660);
   if ($$(".candle.out").length === $$(".candle").length) {
+    RESULTS.candlesBlown = true;
     $("#cake-msg").textContent = "Your wish is on its way. Happy birthday, Kuku!";
     burstConfetti(250); ding(1046);
   }
@@ -402,45 +505,56 @@ $$(".candle").forEach(c => c.onclick = () => {
 /* =========================================================
    TIMELINE
    ========================================================= */
-CONFIG.timeline.forEach(item => {
-  const div = document.createElement("div");
-  div.className = "tl-item reveal";
-  div.innerHTML = `<div class="tl-dot"></div>
-    <div class="tl-card"><img alt="">
-      <span class="tl-date">${item.date}</span><h3>${item.title}</h3><p>${item.text}</p></div>`;
-  setImage(div.querySelector("img"), item.photo);
-  $("#timeline").appendChild(div);
-  revealObserver.observe(div);
-});
+(() => {
+  const frag = document.createDocumentFragment(), items = [];
+  CONFIG.timeline.forEach(item => {
+    const div = make("div", "tl-item reveal", `<div class="tl-dot"></div>
+      <div class="tl-card"><img alt="">
+        <span class="tl-date">${item.date}</span><h3>${item.title}</h3><p>${item.text}</p></div>`);
+    setImage(div.querySelector("img"), item.photo, true);
+    frag.append(div); items.push(div);
+  });
+  $("#timeline").append(frag);
+  items.forEach(el => revealObserver.observe(el));
+})();
 
 /* =========================================================
-   GALLERY + LIGHTBOX
+   GALLERY + LIGHTBOX  (shows pic1 .. pic<photoCount> in number order, missing numbers are skipped)
    ========================================================= */
 const galleryItems = [];
 let lbIndex = 0;
-(async function buildGallery() {
+async function buildGallery() {
   const grid = $("#gallery-grid");
-  const srcs = await Promise.all(Array.from({ length: CONFIG.photoCount }, (_, i) => resolveImage("pic" + (i + 1))));
+  const names = Array.from({ length: CONFIG.photoCount || 50 }, (_, i) => "pic" + (i + 1));
+  const srcs = await Promise.all(names.map(n => resolvePhoto(n)));
+  const frag = document.createDocumentFragment();
   srcs.forEach((src, i) => {
     if (!src) return;
-    const idx = galleryItems.length;
-    const caption = CONFIG.captions[i] || "";
+    const idx = galleryItems.length, caption = CONFIG.captions[i] || "";
     galleryItems.push({ src, caption });
-    const el = document.createElement("div");
-    el.className = "polaroid";
+    const el = make("div", "polaroid", `<img src="${src}" alt="" loading="lazy" decoding="async"><p>${caption || "&#10084;"}</p>`);
+    el.dataset.i = idx;
     el.style.setProperty("--r", (Math.random() * 8 - 4).toFixed(1) + "deg");
-    el.style.animationDelay = idx * 0.08 + "s";
-    el.innerHTML = `<img src="${src}" alt="" loading="lazy"><p>${caption || "&#10084;"}</p>`;
-    el.onclick = () => openLightbox(idx);
-    grid.appendChild(el);
+    el.style.animationDelay = Math.min(idx, 14) * 0.08 + "s";
+    frag.append(el);
   });
   if (!galleryItems.length) grid.innerHTML = '<p class="empty">Add photos to the pictures folder (pic1.jpg, pic2.png, ...)</p>';
-})();
+  else grid.append(frag);
+}
+$("#gallery-grid").addEventListener("click", e => {
+  const p = e.target.closest(".polaroid");
+  if (p) openLightbox(+p.dataset.i);
+});
+whenNear("#gallery", buildGallery);
+
 function openLightbox(i) {
-  lbIndex = (i + galleryItems.length) % galleryItems.length;
+  const n = galleryItems.length;
+  if (!n) return;
+  lbIndex = (i + n) % n;
   $("#lb-img").src = galleryItems[lbIndex].src;
   $("#lb-caption").textContent = galleryItems[lbIndex].caption;
   $("#lightbox").classList.add("show");
+  [lbIndex - 1, lbIndex + 1].forEach(k => { new Image().src = galleryItems[(k + n) % n].src; });   // warm the neighbours
 }
 $(".lb-close").onclick = () => $("#lightbox").classList.remove("show");
 $(".lb-prev").onclick = e => { e.stopPropagation(); openLightbox(lbIndex - 1); };
@@ -450,16 +564,18 @@ $("#lightbox").onclick = e => { if (e.target.id === "lightbox") $("#lightbox").c
 /* =========================================================
    REASONS
    ========================================================= */
-CONFIG.reasons.forEach((r, i) => {
-  const el = document.createElement("div");
-  el.className = "reason reveal";
-  el.innerHTML = `<div class="reason-inner">
-      <div class="reason-face reason-front"><div class="big">&#10084;</div><span>Reason #${i + 1}</span></div>
-      <div class="reason-face reason-back"><p>${r}</p></div></div>`;
-  el.onclick = () => { el.classList.toggle("flipped"); ding(990); };
-  $("#reasons-grid").appendChild(el);
-  revealObserver.observe(el);
-});
+(() => {
+  const frag = document.createDocumentFragment(), cards = [];
+  CONFIG.reasons.forEach((r, i) => {
+    const el = make("div", "reason reveal", `<div class="reason-inner">
+        <div class="reason-face reason-front"><div class="big">&#10084;</div><span>Reason #${i + 1}</span></div>
+        <div class="reason-face reason-back"><p>${r}</p></div></div>`);
+    el.onclick = () => { el.classList.toggle("flipped"); ding(990); };
+    frag.append(el); cards.push(el);
+  });
+  $("#reasons-grid").append(frag);
+  cards.forEach(el => revealObserver.observe(el));
+})();
 
 /* =========================================================
    GAME TABS
@@ -475,41 +591,49 @@ function winMessage(sel, text) {
   burstConfetti(160); ding(1046);
 }
 
-/* ---------- 1. MEMORY ---------- */
-let memFirst = null, memLock = false, memMoves = 0, memMatched = 0;
+/* ---------- 1. MEMORY  (uses exactly the photos listed in CONFIG.memoryPhotos) ---------- */
+let memFirst = null, memLock = false, memMoves = 0, memMatched = 0, memPairs = 0, memToken = 0;
 async function initMemory() {
+  const token = ++memToken;                                        // ignore stale runs (fast double-tap on restart)
   const board = $("#memory-board");
-  board.innerHTML = ""; memFirst = null; memLock = false; memMoves = 0; memMatched = 0;
-  $("#mem-moves").textContent = 0; $("#mem-msg").textContent = "";
-  const srcs = await Promise.all(CONFIG.memoryPhotos.map(n => resolveImage(n).then(s => s || placeholderSrc(n))));
-  const cards = shuffle([...srcs.map((s, i) => ({ s, id: i })), ...srcs.map((s, i) => ({ s, id: i }))]);
-  cards.forEach(c => {
-    const el = document.createElement("div");
-    el.className = "m-card"; el.dataset.id = c.id;
-    el.innerHTML = `<div class="m-inner"><div class="m-face m-front">&#10084;</div>
-      <div class="m-face m-back"><img src="${c.s}" alt=""></div></div>`;
-    el.onclick = () => flipMemory(el);
-    board.appendChild(el);
+  board.textContent = ""; memFirst = null; memLock = false; memMoves = 0; memMatched = 0;
+  setText($("#mem-moves"), 0); setText($("#mem-msg"), "");
+  const names = [...new Set(CONFIG.memoryPhotos.map(photoName))];  // same photo listed twice counts once
+  const srcs = await Promise.all(names.map(async n => (await resolvePhoto(n)) || placeholderSrc(n)));
+  if (token !== memToken) return;
+  memPairs = srcs.length;
+  const frag = document.createDocumentFragment();
+  shuffle(srcs.flatMap((s, id) => [{ s, id }, { s, id }])).forEach(c => {
+    const el = make("div", "m-card", `<div class="m-inner"><div class="m-face m-front">&#10084;</div>
+      <div class="m-face m-back"><img src="${c.s}" alt="" decoding="async"></div></div>`);
+    el.dataset.id = c.id;
+    frag.append(el);
   });
+  board.append(frag);
 }
 function flipMemory(el) {
   if (memLock || el.classList.contains("flipped")) return;
   el.classList.add("flipped");
   if (!memFirst) { memFirst = el; return; }
-  memMoves++; $("#mem-moves").textContent = memMoves;
+  memMoves++; setText($("#mem-moves"), memMoves);
   if (memFirst.dataset.id === el.dataset.id) {
     memFirst.classList.add("matched"); el.classList.add("matched");
     memFirst = null; memMatched++; ding(880);
-    if (memMatched === CONFIG.memoryPhotos.length)
+    if (memMatched === memPairs) {
+      RESULTS.memory = `${memMoves} moves`;
       winMessage("#mem-msg", `All matched in ${memMoves} moves. Just like us, a perfect match.`);
+    }
   } else {
     memLock = true;
     const a = memFirst; memFirst = null;
     setTimeout(() => { a.classList.remove("flipped"); el.classList.remove("flipped"); memLock = false; }, 900);
   }
 }
+$("#memory-board").addEventListener("click", e => {
+  const el = e.target.closest(".m-card");
+  if (el) flipMemory(el);
+});
 $("#mem-restart").onclick = initMemory;
-initMemory();
 
 /* ---------- 2. QUIZ ---------- */
 let qi = 0, qScore = 0;
@@ -519,10 +643,11 @@ function renderQuiz() {
     const msg = qScore === total ? "Perfect score. You know us better than anyone."
       : qScore >= total / 2 ? "Not bad at all. I still love you completely."
       : "Hmm... we clearly need more dates to study.";
+    RESULTS.quizScore = `${qScore} / ${total}`;
     box.innerHTML = `<h3>You scored ${qScore} / ${total}</h3><p class="game-msg">${msg}</p>
       <button class="btn" id="quiz-restart">Play again</button>`;
     if (qScore === total) { burstConfetti(160); ding(1046); }
-    $("#quiz-restart").onclick = () => { qi = 0; qScore = 0; renderQuiz(); };
+    $("#quiz-restart").onclick = () => { qi = 0; qScore = 0; RESULTS.quiz.length = 0; renderQuiz(); };
     return;
   }
   const q = CONFIG.quiz[qi];
@@ -530,9 +655,10 @@ function renderQuiz() {
     <div class="quiz-options">${q.options.map((o, i) => `<button class="quiz-opt" data-i="${i}">${o}</button>`).join("")}</div>`;
   const opts = box.querySelectorAll(".quiz-opt");
   opts.forEach(b => b.onclick = () => {
-    const i = +b.dataset.i;
+    const i = +b.dataset.i, ok = i === q.answer;
     opts.forEach(x => x.disabled = true);
-    if (i === q.answer) { b.classList.add("correct"); qScore++; ding(880); }
+    RESULTS.quiz.push({ q: q.q, chosen: q.options[i], correct: ok, right: q.options[q.answer] });
+    if (ok) { b.classList.add("correct"); qScore++; ding(880); }
     else { b.classList.add("wrong"); opts[q.answer].classList.add("correct"); ding(300); }
     setTimeout(() => { qi++; renderQuiz(); }, 1200);
   });
@@ -543,35 +669,35 @@ renderQuiz();
 let chScore = 0, chTime = 30, chTimer, chSpawn, chRunning = false;
 function startHearts() {
   const area = $("#hearts-area");
-  area.innerHTML = "";
+  area.textContent = "";
   chScore = 0; chTime = 30; chRunning = true;
-  $("#ch-score").textContent = 0; $("#ch-time").textContent = 30; $("#ch-msg").textContent = "";
+  setText($("#ch-score"), 0); setText($("#ch-time"), 30); setText($("#ch-msg"), "");
   $("#ch-start").disabled = true;
   chSpawn = setInterval(spawnHeart, 550);
   chTimer = setInterval(() => {
-    chTime--; $("#ch-time").textContent = chTime;
+    chTime--; setText($("#ch-time"), chTime);
     if (chTime <= 0) endHearts();
   }, 1000);
 }
 function spawnHeart() {
   const area = $("#hearts-area");
-  const h = document.createElement("span");
   const size = 26 + Math.random() * 22;
-  h.className = "falling-heart"; h.innerHTML = "&#10084;";
+  const h = make("span", "falling-heart", "&#10084;");
   h.style.fontSize = size + "px";
-  h.style.left = Math.random() * (area.clientWidth - size) + "px";
+  h.style.left = Math.max(0, Math.random() * (area.clientWidth - size)) + "px";
   h.style.animationDuration = 2.3 + Math.random() * 2 + "s";
   h.addEventListener("pointerdown", () => {
-    if (!chRunning) return;
-    chScore++; $("#ch-score").textContent = chScore; ding(1200);
+    if (!chRunning || h.classList.contains("popped")) return;
+    chScore++; setText($("#ch-score"), chScore); ding(1200);
     h.style.animationPlayState = "paused"; h.classList.add("popped");
     setTimeout(() => h.remove(), 250);
   });
   h.addEventListener("animationend", () => h.remove());
-  area.appendChild(h);
+  area.append(h);
 }
 function endHearts() {
   clearInterval(chSpawn); clearInterval(chTimer); chRunning = false;
+  RESULTS.hearts = Math.max(RESULTS.hearts ?? 0, chScore);
   $("#ch-start").disabled = false; $("#ch-start").textContent = "Play again";
   const msg = chScore >= 25 ? `${chScore} hearts! But you caught mine long ago.`
     : chScore >= 12 ? `${chScore} hearts. Every single one belongs to you anyway.`
@@ -580,54 +706,71 @@ function endHearts() {
 }
 $("#ch-start").onclick = startHearts;
 
-/* ---------- 4. PUZZLE ---------- */
+/* ---------- 4. PUZZLE (tiles are built once and only repainted) ---------- */
 const PZ = 3;
-let pzOrder = [], pzSel = null, pzSrc = "", pzMoves = 0, pzSolved = false;
+let pzOrder = [], pzSel = null, pzSrc = "", pzMoves = 0, pzSolved = false, pzTiles = [], pzToken = 0;
 async function initPuzzle() {
-  pzSrc = (await resolveImage(CONFIG.puzzlePhoto)) || placeholderSrc(CONFIG.puzzlePhoto);
-  $("#puzzle-preview").src = pzSrc;
-  const img = new Image();
-  img.onload = () => {
-    const ratio = img.naturalWidth / img.naturalHeight;
-    const board = $("#puzzle-board");
-    board.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
-    if (ratio < 1) board.style.width = `min(${Math.round(360 * ratio)}px, 85vw)`;
+  const token = ++pzToken;
+  const src = (await resolvePhoto(CONFIG.puzzlePhoto)) || placeholderSrc(photoName(CONFIG.puzzlePhoto));
+  if (token !== pzToken) return;
+  pzSrc = src;
+  $("#puzzle-preview").src = src;
+  const probe = new Image();
+  probe.onload = () => {
+    const board = $("#puzzle-board"), ratio = probe.naturalWidth / probe.naturalHeight;
+    board.style.aspectRatio = `${probe.naturalWidth} / ${probe.naturalHeight}`;
+    board.style.width = ratio < 1 ? `min(${Math.round(360 * ratio)}px, 85vw)` : "";
   };
-  img.src = pzSrc;
+  probe.src = src;
   pzOrder = [...Array(PZ * PZ).keys()];
   do { shuffle(pzOrder); } while (pzOrder.every((v, i) => v === i));
   pzSel = null; pzMoves = 0; pzSolved = false;
-  $("#pz-moves").textContent = 0; $("#pz-msg").textContent = "";
-  $("#puzzle-board").classList.remove("solved");
-  renderPuzzle();
-}
-function renderPuzzle() {
+  setText($("#pz-moves"), 0); setText($("#pz-msg"), "");
   const board = $("#puzzle-board");
-  board.innerHTML = "";
-  pzOrder.forEach((piece, pos) => {
-    const t = document.createElement("div");
-    t.className = "pz-tile" + (pzSel === pos ? " selected" : "");
-    t.style.backgroundImage = `url("${pzSrc}")`;
+  board.classList.remove("solved");
+  board.textContent = ""; pzTiles = [];
+  const frag = document.createDocumentFragment();
+  for (let pos = 0; pos < PZ * PZ; pos++) {
+    const t = make("div", "pz-tile");
+    t.style.backgroundImage = `url("${src}")`;
     t.style.backgroundSize = `${PZ * 100}% ${PZ * 100}%`;
+    pzTiles.push(t); frag.append(t);
+  }
+  board.append(frag);
+  paintPuzzle();
+}
+function paintPuzzle() {
+  pzTiles.forEach((t, pos) => {
+    const piece = pzOrder[pos];
     t.style.backgroundPosition = `${(piece % PZ) * 100 / (PZ - 1)}% ${Math.floor(piece / PZ) * 100 / (PZ - 1)}%`;
-    t.onclick = () => {
-      if (pzSolved) return;
-      if (pzSel === null) { pzSel = pos; }
-      else {
-        [pzOrder[pzSel], pzOrder[pos]] = [pzOrder[pos], pzOrder[pzSel]];
-        pzSel = null; pzMoves++; $("#pz-moves").textContent = pzMoves;
-        if (pzOrder.every((v, i) => v === i)) {
-          pzSolved = true; board.classList.add("solved");
-          winMessage("#pz-msg", `Solved in ${pzMoves} moves. You complete the picture, always.`);
-        }
-      }
-      renderPuzzle();
-    };
-    board.appendChild(t);
+    t.classList.toggle("selected", pzSel === pos);
   });
 }
+function clickTile(pos) {
+  if (pzSolved || pos < 0) return;
+  if (pzSel === null) pzSel = pos;
+  else if (pzSel === pos) pzSel = null;
+  else {
+    [pzOrder[pzSel], pzOrder[pos]] = [pzOrder[pos], pzOrder[pzSel]];
+    pzSel = null; pzMoves++; setText($("#pz-moves"), pzMoves);
+    if (pzOrder.every((v, i) => v === i)) {
+      pzSolved = true; $("#puzzle-board").classList.add("solved");
+      RESULTS.puzzle = `Solved in ${pzMoves} moves`;
+      paintPuzzle();
+      winMessage("#pz-msg", `Solved in ${pzMoves} moves. You complete the picture, always.`);
+      return;
+    }
+  }
+  paintPuzzle();
+}
+$("#puzzle-board").addEventListener("click", e => {
+  const t = e.target.closest(".pz-tile");
+  if (t) clickTile(pzTiles.indexOf(t));
+});
 $("#pz-restart").onclick = initPuzzle;
-initPuzzle();
+
+/* Photos for the memory game and puzzle are looked up just before the games section scrolls into view */
+whenNear("#games", () => { initMemory(); initPuzzle(); });
 
 /* ---------- 5. SPIN THE WHEEL ---------- */
 (function drawWheel() {
@@ -647,25 +790,31 @@ initPuzzle();
   ctx.fillStyle = "#e8467c"; ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText("\u2764", r, r + 2);
 })();
-let wheelRot = 0, spinning = false, lastAns = -1;
-$("#wheel-spin").onclick = () => {
-  if (spinning) return;
-  spinning = true; $("#wheel-msg").textContent = "";
-  wheelRot += 360 * 6 + Math.floor(Math.random() * 360);
-  $("#wheel").style.transform = `rotate(${wheelRot}deg)`;
-};
-$("#wheel").addEventListener("transitionend", () => {
-  spinning = false;
+let wheelRot = 0, spinning = false, lastAns = -1, spinTimer;
+function finishSpin() {
+  if (!spinning) return;
+  spinning = false; clearTimeout(spinTimer);
   let i;
   do { i = Math.floor(Math.random() * CONFIG.wheelAnswers.length); }
   while (i === lastAns && CONFIG.wheelAnswers.length > 1);
   lastAns = i;
+  RESULTS.wheel.push(CONFIG.wheelAnswers[i]);
   winMessage("#wheel-msg", CONFIG.wheelAnswers[i]);
-});
+}
+$("#wheel-spin").onclick = () => {
+  if (spinning) return;
+  spinning = true; setText($("#wheel-msg"), "");
+  wheelRot += 360 * 6 + Math.floor(Math.random() * 360);
+  const wheel = $("#wheel");
+  wheel.style.transform = `rotate(${wheelRot}deg)`;
+  const ms = (parseFloat(getComputedStyle(wheel).transitionDuration) || 0) * 1000;
+  spinTimer = setTimeout(finishSpin, ms + 400);                    // fallback in case transitionend never fires
+};
+$("#wheel").addEventListener("transitionend", e => { if (e.target === e.currentTarget) finishSpin(); });
 
 /* ---------- 6. SCRATCH CARD ---------- */
-const sc = $("#scratch"), sctx = sc.getContext("2d");
-let scratching = false, scratchDone = false, scratchMoves = 0;
+const sc = $("#scratch"), sctx = sc.getContext("2d", { willReadFrequently: true });
+let scratching = false, scratchDone = false, scratchMoves = 0, lastScratchCheck = 0;
 function initScratch() {
   scratchDone = false; scratchMoves = 0;
   sc.style.transition = "none"; sc.style.opacity = 1; sc.style.pointerEvents = "auto";
@@ -688,11 +837,14 @@ function scratchAt(e) {
 }
 function checkScratch() {
   if (scratchDone) return;
+  const now = performance.now();
+  if (now - lastScratchCheck < 150) return;                        // reading pixels is slow, so do it sparingly
+  lastScratchCheck = now;
   const d = sctx.getImageData(0, 0, sc.width, sc.height).data;
   let clear = 0, total = 0;
   for (let i = 3; i < d.length; i += 16) { total++; if (d[i] === 0) clear++; }
   if (clear / total > 0.5) {
-    scratchDone = true;
+    scratchDone = true; RESULTS.scratch = true;
     sc.style.transition = "opacity .8s"; sc.style.opacity = 0; sc.style.pointerEvents = "none";
     burstConfetti(150); ding(1046);
   }
@@ -706,7 +858,7 @@ initScratch();
 /* =========================================================
    LETTER (typewriter)
    ========================================================= */
-setImage($("#letter-img"), CONFIG.letterPhoto);
+setImage($("#letter-img"), CONFIG.letterPhoto, true);
 let letterStarted = false, letterSkip = false;
 function typeLetter() {
   if (letterStarted) return;
@@ -720,15 +872,17 @@ function typeLetter() {
     if (i < txt.length) setTimeout(step, txt[i - 1] === "\n" ? 250 : 32);
     else {
       el.classList.remove("typing");
+      RESULTS.letterRead = true;
       $("#letter-sign").textContent = `Forever yours, ${CONFIG.signOff}`;
       $("#letter-sign").classList.add("show");
     }
   })();
 }
 $("#letter-card").onclick = () => { letterSkip = true; };
-new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting && unlocked) typeLetter(); });
-}, { threshold: 0.3 }).observe($("#letter-card"));
+const letterObserver = new IntersectionObserver(entries => {
+  if (entries.some(e => e.isIntersecting && unlocked)) { typeLetter(); letterObserver.disconnect(); }
+}, { threshold: 0.3 });
+letterObserver.observe($("#letter-card"));
 
 /* =========================================================
    FINAL SURPRISE
@@ -741,9 +895,9 @@ $("#final-btn").onclick = () => {
   setTimeout(() => burstConfetti(200), 900);
 };
 $("#final-pop").onclick = () => $("#final-pop").classList.remove("show");
+
 /* =========================================================
    V2 UPGRADE: gates, page transitions, polish
-   Paste once at the END of script.js
    ========================================================= */
 (() => {
   /* ---------- EDIT GATE MESSAGES HERE ---------- */
@@ -769,13 +923,6 @@ $("#final-pop").onclick = () => $("#final-pop").classList.remove("show");
                    reasons: "Reasons I Like You", games: "Birthday Games", letter: "A Letter For You" };
 
   /* ---------- Helpers ---------- */
-  const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const make = (tag, cls, html) => {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (html != null) e.innerHTML = html;
-    return e;
-  };
   const playEntrance = container => {
     [...container.children].forEach((c, i) => c.style.setProperty("--i", i));
     container.classList.add("entering");
@@ -802,17 +949,22 @@ $("#final-pop").onclick = () => $("#final-pop").classList.remove("show");
     toastTimer = setTimeout(() => toast.classList.remove("show"), 4000);
   };
 
+  let scrollRaf = 0;
   addEventListener("scroll", () => {
-    const max = document.documentElement.scrollHeight - innerHeight;
-    progressBar.style.width = (max > 0 ? (scrollY / max) * 100 : 0) + "%";
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      const max = document.documentElement.scrollHeight - innerHeight;
+      progressBar.style.width = (max > 0 ? (scrollY / max) * 100 : 0) + "%";
+    });
   }, { passive: true });
 
   /* ---------- Highlight active menu link ---------- */
-  const nav = $("#nav");
+  const nav = $("#nav"), navLinks = [...$$("#nav a")];
   const navObserver = new IntersectionObserver(entries => {
     entries.forEach(e => {
       if (!e.isIntersecting) return;
-      $$("#nav a").forEach(a => {
+      navLinks.forEach(a => {
         const on = a.getAttribute("href") === "#" + e.target.id;
         a.classList.toggle("active", on);
         if (on) nav.scrollTo({ left: a.offsetLeft - nav.clientWidth / 2 + a.clientWidth / 2, behavior: "smooth" });
@@ -941,20 +1093,22 @@ $("#final-pop").onclick = () => $("#final-pop").classList.remove("show");
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
   /* ---------- Twinkling stars on lock screen ---------- */
-  for (let i = 0; i < 60; i++) {
+  const starFrag = document.createDocumentFragment();
+  for (let i = 0, n = Math.round(60 * (FX || 0.6)); i < n; i++) {
     const s = make("span", "star");
     s.style.left = Math.random() * 100 + "%";
     s.style.top = Math.random() * 100 + "%";
     s.style.animationDuration = 2 + Math.random() * 3 + "s";
     s.style.animationDelay = -Math.random() * 5 + "s";
-    $("#lock").appendChild(s);
+    starFrag.append(s);
   }
+  $("#lock").append(starFrag);
 
   /* ---------- Sparkle trail (laptop mouse only) ---------- */
   if (!REDUCED) {
-    let lastSpark = 0;
+    let lastSpark = 0, liveSparks = 0;
     addEventListener("pointermove", e => {
-      if (e.pointerType !== "mouse") return;
+      if (e.pointerType !== "mouse" || liveSparks > 24) return;
       const now = performance.now();
       if (now - lastSpark < 45) return;
       lastSpark = now;
@@ -964,7 +1118,8 @@ $("#final-pop").onclick = () => $("#final-pop").classList.remove("show");
       s.style.setProperty("--s", 8 + Math.random() * 10 + "px");
       s.style.color = Math.random() > 0.5 ? "#e8467c" : "#d9a441";
       document.body.appendChild(s);
-      setTimeout(() => s.remove(), 900);
+      liveSparks++;
+      setTimeout(() => { s.remove(); liveSparks--; }, 900);
     }, { passive: true });
   }
 
@@ -979,3 +1134,17 @@ $("#final-pop").onclick = () => $("#final-pop").classList.remove("show");
     if (lbOpen && e.key === "ArrowRight") openLightbox(lbIndex + 1);
   });
 })();
+
+/* =========================================================
+   DEBUG: open index.html?debug to see which photo file each setting resolved to
+   ========================================================= */
+if (DEBUG) addEventListener("load", async () => {
+  const items = [["hero", CONFIG.heroPhoto], ["letter", CONFIG.letterPhoto], ["puzzle", CONFIG.puzzlePhoto],
+    ...CONFIG.memoryPhotos.map(p => ["memory", p]), ...CONFIG.timeline.map(t => ["timeline", t.photo])];
+  const rows = await Promise.all(items.map(async ([where, id]) => ({ where, photo: photoName(id), file: (await resolvePhoto(id)) || "MISSING" })));
+  console.table(rows);
+  const box = make("pre", "", rows.map(r => `${r.file === "MISSING" ? "x" : "ok"}  ${r.where.padEnd(9)} ${r.photo.padEnd(8)} ${r.file}`).join("\n"));
+  box.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:99999;max-height:50vh;overflow:auto;margin:0;padding:10px;background:rgba(0,0,0,.85);color:#fff;font:11px/1.4 monospace;border-radius:8px";
+  box.onclick = () => box.remove();
+  document.body.append(box);
+});
