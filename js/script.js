@@ -485,7 +485,7 @@ function updateTimers() {
     setText(cdSecs, Math.floor(diff / 1000) % 60);
   } else {
     countdownBox.style.display = "none";
-    setText(heroSub, `It's finally here. Happy ${ordinal(CONFIG.turningAge)} birthday, my love. Today is all about you.`);
+    setText(heroSub, `It's finally here. Happy ${ordinal(CONFIG.turningAge)} birthday, my kuku. Today is all about you.`);
   }
   setText(daysTogether, Math.max(0, Math.floor((now - metAt) / 86400000)));
   setTimeout(updateTimers, diff > 0 ? 1000 - (Date.now() % 1000) : 60000);   // stays on the second, then relaxes after the birthday
