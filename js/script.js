@@ -32,9 +32,9 @@ const CONFIG = {
     { date: "2026", title: "Our first lunch together", photo: "pic6",
       text: "I pretended it was just lunch. It wasn't. I didn't want that hour to end." },
     { date: "2026", title: "The day I knew", photo: "pic7",
-      text: "Somewhere between the meetings and the laughter, I realised I was falling for you." },
+      text: "Somewhere between the meetings and the laughter, I realised how much special you are" },
     { date: "2026", title: "That after party night", photo: "pic8",
-      text: "When I dropped you back, you said \"Achha ladka h tu\". I smiled all the way home, and I still do when I think about it." },
+      text: "When I dropped you back, you said \"Somthing.....\". I smiled all the way home, and I still do when I think about it." },
     { date: "2026", title: "Little messages, big smiles", photo: "pic9",
       text: "A random text from you could fix my whole day. My phone has never been my favourite thing like it is now." },
     { date: "2026", title: "Ordinary days, favourite memories", photo: "pic10",
@@ -47,8 +47,8 @@ const CONFIG = {
     "Your smile makes even the longest workday feel short.",
     "You laugh at my jokes, even the really bad ones.",
     "Your kindness to everyone around you.",
-    "You make Mondays bearable. That is a superpower.",
-    "The way you say my name.",
+    "You make Workdays bearable. That is a superpower.",
+    "I love the way you ask my name, as if hearing it from you is the nicest part of my day.",
     "You are smart, and you make me want to be better.",
     "You care about the little things, and about me.",
     "Because you are simply you, and that is more than enough."
@@ -64,18 +64,18 @@ const CONFIG = {
   ],
 
   wheelAnswers: [
-    "Nishant will do all the task whatever you ask for today",
-    "You win unlimited rights to steal Nishant's times.",
-    "Nishant must agree with you in every argument for 24 hours.",
+    "Today, Nishant will happily do every task you give him. No complaints, no questions.",
+    "You win unlimited rights to steal Nishant's time. All of it. Forever.",
+    "For the next 24 hours, Nishant must agree with you in every argument, even when you're wrong (which is never).",
     "Nishant changes his Teams status to 'Kuku is the best' for a whole day.",
-    "Congratulations, you won... more Nishant. No refunds, no returns.",
+    "Congratulations, you won... more Nishant. No refunds, no returns, no exchanges.",
     "Nishant must text you 'You were right' every day for a week.",
-    "Your prize: a hug so long it becomes awkward.",
-    "Nishant will ask you out for whole day, with most beautiful way.",
-    "Today's forecast: 100% chance of Nishant being annoying.",
+    "Your prize: a hug so long it gets awkward, and then even longer.",
+    "Nishant will take you out for a whole day, planned in the most beautiful way possible.",
+    "Today's forecast: 100% chance of Nishant being annoying, with a 200% chance of loving you.",
     "You are officially the boss. (Nishant never was.)",
-    "Nishant must laugh at all your jokes today. He already does anyway.",
-    "The wheel is shy. It says: spin again."
+    "Nishant must laugh at all your jokes today. He already does anyway, but now it's official.",
+    "The wheel is shy and blushing. It says: spin again."
   ],
 
   scratchMessage: "You are my favourite person, at work and everywhere else.<br><br>Dinner date this weekend is on me.",
@@ -88,7 +88,7 @@ When you joined our project in January, I thought I was just getting a new teamm
 
 Thank you for your beautiful smile, your patience, your laughter, and for making ordinary days feel special. You turned meetings into memories and tea breaks into moments I look forward to.
 
-I love the way you asking my name, enjoy your day!
+I love the way you ask my name, as if hearing it from you is the nicest part of my day. Enjoy your Day.
 
 This is your first birthday with me, and I hope it is the first of many. Whatever this new year brings, I want to be right there beside you, cheering the loudest.
 
