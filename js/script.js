@@ -16,8 +16,8 @@ const CONFIG = {
   photoCount: 50,                      // gallery shows pic1..pic50 in number order; missing numbers are skipped
   heroPhoto: "pic1",
   letterPhoto: "pic2",
-  puzzlePhoto: "pic33",
-  memoryPhotos: ["pic1", "pic2", "pic3", "pic4", "pic5", "pic6", "pic41", "pic8", "pic9", "pic33", "pic12"],   // every photo listed here becomes a pair of cards
+  puzzlePhoto: "pic11",
+  memoryPhotos: ["pic1", "pic2", "pic3", "pic4", "pic5", "pic6", "pic7", "pic8", "pic9", "pic10", "pic11"],   // every photo listed here becomes a pair of cards
   captions: [],                        // optional: ["caption for pic1", "caption for pic2", ...]
 
   timeline: [
