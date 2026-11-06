@@ -13,7 +13,7 @@ const CONFIG = {
   /* PHOTOS: write them as numbers (41), "41" or "pic41" - all three work. Files live in the pictures folder.
      Open index.html?debug to see which file each photo below was matched to (or MISSING). */
   photoVersion: "1",                   // change to "2", "3"... after you REPLACE picture files, so phones reload them
-  photoCount: 50,                      // gallery shows pic1..pic50 in number order; missing numbers are skipped
+  photoCount: 60,                      // gallery shows pic1..pic50 in number order; missing numbers are skipped
   heroPhoto: "pic1",
   letterPhoto: "pic2",
   puzzlePhoto: "pic11",
